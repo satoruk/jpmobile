@@ -26,24 +26,13 @@ class ActionView::Base #:nodoc:
 
   if ::ActionPack::VERSION::MAJOR >=2 and ::ActionPack::VERSION::MINOR >= 3
     ### Rails 2.3 or higher
-    alias find_template_without_jpmobile find_template #:nodoc:
-    alias render_partial_without_jpmobile render_partial #:nodoc:
-
-    def find_template(template_path)
-      mobile_path = mobile_template_path(template_path)
-      return mobile_path.nil? ? _pick_template_without_jpmobile(template_path) :
-                                _pick_template_without_jpmobile(mobile_path)
+    alias view_paths_eq_without_jpmobile view_paths= #:nodoc:
+    
+    def view_paths=(paths)
+      view_paths_eq_without_jpmobile(paths)
+      @view_paths.controller = self.controller
     end
-
-    def render_partial(options = {}) #:nodoc:
-      case partial_path = options[:partial]
-      when String, Symbol, NilClass
-        mobile_path = mobile_template_path(partial_path, true)
-        options = options.merge(:partial => mobile_path) if mobile_path
-      end
-      render_partial_without_jpmobile(options)
-    end
-
+    
   elsif ::ActionPack::VERSION::MAJOR >=2 and ::ActionPack::VERSION::MINOR >= 2
     ### Rails 2.2 or higher
     alias _pick_template_without_jpmobile _pick_template #:nodoc:
@@ -126,7 +115,9 @@ class ActionView::Base #:nodoc:
     return nil
   end
 
-  if ::ActionPack::VERSION::MAJOR >=2 and ::ActionPack::VERSION::MINOR >= 2
+  if ::ActionPack::VERSION::MAJOR >=2 and ::ActionPack::VERSION::MINOR >= 3
+    ### Rails 2.3 or higher
+  elsif ::ActionPack::VERSION::MAJOR >=2 and ::ActionPack::VERSION::MINOR >= 2
     ### Rails 2.2 or higher
     def template_exists?(template_name)
       send(:_pick_template_without_jpmobile, template_name) ? true : false
@@ -140,3 +131,67 @@ class ActionView::Base #:nodoc:
     end
   end
 end
+
+class ActionView::PathSet #:nodoc:
+  if ::ActionPack::VERSION::MAJOR >=2 and ::ActionPack::VERSION::MINOR >= 3
+    ### Rails 2.3 or higher
+    
+    attr_accessor :controller
+
+    def mobile_path template_path, type
+      "#{template_path}_#{type}"
+    end
+    
+    def mobile_template_candidates
+        candidates = []
+        c = controller.request.mobile.class
+        while c != Jpmobile::Mobile::AbstractMobile
+          candidates << "mobile_"+c.to_s.split(/::/).last.downcase
+          c = c.superclass
+        end
+        candidates << "mobile"
+    end
+    
+    def find_mobile_template(template_path, format = nil, html_fallback = true)
+      if controller.is_a?(ActionController::Base) && m = controller.request.mobile
+        mobile_template_candidates.each do |v|
+          mtemplate_path = mobile_path template_path, v
+          
+          each do |load_path|
+            if format && (template = load_path["#{mtemplate_path}.#{I18n.locale}.#{format}"])
+              return template
+            elsif format && (template = load_path["#{mtemplate_path}.#{format}"])
+              return template
+            elsif template = load_path["#{mtemplate_path}.#{I18n.locale}"]
+              return template
+            elsif template = load_path[mtemplate_path]
+              return template
+            # Try to find html version if the format is javascript
+            elsif format == :js && html_fallback && template = load_path["#{mtemplate_path}.#{I18n.locale}.html"]
+              return template
+            elsif format == :js && html_fallback && template = load_path["#{mtemplate_path}.html"]
+              return template
+            end
+          end
+          
+        end
+      end
+      return nil
+    end
+
+    
+    alias find_template_without_jpmobile find_template #:nodoc:
+    
+    def find_template(original_template_path, format = nil, html_fallback = true)
+      return original_template_path if original_template_path.respond_to?(:render)
+      
+      mobile_path = find_mobile_template(original_template_path, format, html_fallback)
+      return mobile_path if mobile_path
+      
+      find_template_without_jpmobile(original_template_path,format,html_fallback);
+    end
+  end
+end
+
+
+
